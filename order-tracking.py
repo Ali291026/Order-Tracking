@@ -82,97 +82,174 @@ tab_orders, tab_containers = st.tabs(
 # TAB 1: ORDER MANAGEMENT (TRUE MULTI-ITEM)
 # ==========================================
 with tab_orders:
-  st.subheader("🛒 Add Multiple Line Items to an Order")
-  st.caption(
-      "Create a new Order ID or add extra product lines to an existing Order"
-      " ID."
+  st.subheader("🛒 Purchase Order & Line Item Management")
+
+  # Mode Selector: Create New Order vs Add to Existing
+  order_mode = st.radio(
+      "Select Action:",
+      ["Create New Order", "Add Line Item to Existing Order"],
+      horizontal=True,
   )
 
-  with st.form("add_order_form", clear_on_submit=False):
-    col1, col2, col3 = st.columns(3)
-    with col1:
-      order_id = st.text_input(
-          "Order ID / PO Number", placeholder="e.g., PO-2026-001"
-      )
-    with col2:
-      supplier = st.text_input("Supplier Name", placeholder="e.g., Global Goods Co.")
-    with col3:
-      order_date = st.date_input("Order Date")
-
-    st.markdown("##### Product Line Item")
-    col_p1, col_p2 = st.columns([3, 1])
-    with col_p1:
-      product = st.text_input(
-          "Product Description",
-          placeholder="e.g., Steel Brackets, Model A",
-          key="form_product",
-      )
-    with col_p2:
-      quantity = st.number_input(
-          "Quantity", min_value=1, value=100, key="form_qty"
-      )
-
-    order_status = st.selectbox(
-        "Order Status",
-        [
-            "Order Placed",
-            "In Production",
-            "Ready for Dispatch",
-            "Converted to Shipment",
-        ],
-    )
-
-    submitted_order = st.form_submit_button("Add Line Item to Order")
-
-    if submitted_order:
-      if order_id.strip() == "" or product.strip() == "":
-        st.error("Please enter a valid Order ID and Product Description.")
-      else:
-        new_row = pd.DataFrame([{
-            "Order ID": order_id.strip(),
-            "Supplier": supplier.strip() if supplier else "Unspecified",
-            "Product Description": product.strip(),
-            "Quantity": quantity,
-            "Order Date": str(order_date),
-            "Order Status": order_status,
-        }])
-        st.session_state.order_data = pd.concat(
-            [st.session_state.order_data, new_row], ignore_index=True
+  if order_mode == "Create New Order":
+    with st.form("new_order_form", clear_on_submit=True):
+      col1, col2, col3 = st.columns(3)
+      with col1:
+        order_id = st.text_input(
+            "Order ID / PO Number", placeholder="e.g., PO-2026-001"
         )
-        st.success(f"Added '{product}' (Qty: {quantity}) to Order {order_id}!")
-        st.rerun()
+      with col2:
+        supplier = st.text_input(
+            "Supplier Name", placeholder="e.g., Global Goods Co."
+        )
+      with col3:
+        order_date = st.date_input("Order Date")
+
+      st.markdown("##### First Line Item Details")
+      col_p1, col_p2 = st.columns([3, 1])
+      with col_p1:
+        product = st.text_input(
+            "Product Description", placeholder="e.g., Steel Brackets, Model A"
+        )
+      with col_p2:
+        quantity = st.number_input("Quantity", min_value=1, value=100)
+
+      order_status = st.selectbox(
+          "Initial Order Status",
+          [
+              "Order Placed",
+              "In Production",
+              "Ready for Dispatch",
+              "Converted to Shipment",
+          ],
+      )
+
+      submitted_new = st.form_submit_button("Create Order & Add Item")
+
+      if submitted_new:
+        if order_id.strip() == "" or product.strip() == "":
+          st.error("Please enter a valid Order ID and Product Description.")
+        else:
+          new_row = pd.DataFrame([{
+              "Order ID": order_id.strip(),
+              "Supplier": supplier.strip() if supplier else "Unspecified",
+              "Product Description": product.strip(),
+              "Quantity": quantity,
+              "Order Date": str(order_date),
+              "Order Status": order_status,
+          }])
+          st.session_state.order_data = pd.concat(
+              [st.session_state.order_data, new_row], ignore_index=True
+          )
+          st.success(
+              f"Created Order {order_id} and added item '{product}'!"
+          )
+          st.rerun()
+
+  else:  # Add Line Item to Existing Order
+    if st.session_state.order_data.empty:
+      st.warning(
+          "No existing orders found. Please create a new order first above."
+      )
+    else:
+      with st.form("add_item_form", clear_on_submit=True):
+        existing_orders = st.session_state.order_data[
+            "Order ID"
+        ].unique().tolist()
+        selected_existing_order = st.selectbox(
+            "Select Existing Order ID:", existing_orders
+        )
+
+        st.markdown("##### Additional Line Item Details")
+        col_p1, col_p2 = st.columns([3, 1])
+        with col_p1:
+          product = st.text_input(
+              "Product Description", placeholder="e.g., Rubber Gaskets, Model B"
+          )
+        with col_p2:
+          quantity = st.number_input("Quantity", min_value=1, value=50)
+
+        submitted_item = st.form_submit_button("Add Item to Selected Order")
+
+        if submitted_item:
+          if product.strip() == "":
+            st.error("Please enter a product description.")
+          else:
+            # Grab supplier and date from the existing order row
+            matched_row = st.session_state.order_data[
+                st.session_state.order_data["Order ID"]
+                == selected_existing_order
+            ].iloc[0]
+            sup = matched_row["Supplier"]
+            date = matched_row["Order Date"]
+            status = matched_row["Order Status"]
+
+            new_row = pd.DataFrame([{
+                "Order ID": selected_existing_order,
+                "Supplier": sup,
+                "Product Description": product.strip(),
+                "Quantity": quantity,
+                "Order Date": date,
+                "Order Status": status,
+            }])
+            st.session_state.order_data = pd.concat(
+                [st.session_state.order_data, new_row], ignore_index=True
+            )
+            st.success(
+                f"Successfully added '{product}' to existing Order"
+                f" {selected_existing_order}!"
+            )
+            st.rerun()
 
   st.markdown("---")
-  st.subheader("📋 Active Orders & Line Items")
+  st.subheader("📋 Active Orders & Line Items Summary")
 
-  # Filter Button for Pending Orders
-  col_f1, col_f2 = st.columns([1, 3])
-  with col_f1:
-    show_only_pending = st.checkbox("Show Only Pending Orders")
+  # Summary Metrics / Filter Buttons
+  if not st.session_state.order_data.empty:
+    total_orders_count = st.session_state.order_data["Order ID"].nunique()
+    total_items_count = len(st.session_state.order_data)
+    pending_items_count = len(
+        st.session_state.order_data[
+            st.session_state.order_data["Order Status"]
+            != "Converted to Shipment"
+        ]
+    )
 
-  df_orders = st.session_state.order_data
-  if show_only_pending and not df_orders.empty:
-    df_orders = df_orders[df_orders["Order Status"] != "Converted to Shipment"]
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Unique Orders (POs)", total_orders_count)
+    m2.metric("Total Line Items", total_items_count)
+    m3.metric("Pending Line Items", pending_items_count)
 
-  if df_orders.empty:
-    st.info("No orders found matching your filter.")
+  # Status Filter Buttons / Radio
+  order_filter = st.radio(
+      "Filter Orders View:",
+      ["All Orders", "Pending Only", "Converted Only"],
+      horizontal=True,
+  )
+
+  df_orders_display = st.session_state.order_data
+  if order_filter == "Pending Only" and not df_orders_display.empty:
+    df_orders_display = df_orders_display[
+        df_orders_display["Order Status"] != "Converted to Shipment"
+    ]
+  elif order_filter == "Converted Only" and not df_orders_display.empty:
+    df_orders_display = df_orders_display[
+        df_orders_display["Order Status"] == "Converted to Shipment"
+    ]
+
+  if df_orders_display.empty:
+    st.info("No orders found for this filter.")
   else:
-    st.dataframe(df_orders, use_container_width=True)
+    st.dataframe(df_orders_display, use_container_width=True)
 
     # Conversion Section
     st.markdown("#### 🔄 Convert Entire Order (All Line Items) to Shipment")
     col_conv1, col_conv2 = st.columns(2)
 
     with col_conv1:
-      unique_orders = (
-          st.session_state.order_data["Order ID"]
-          .unique()
-          .tolist()
-          if not st.session_state.order_data.empty
-          else []
-      )
+      unique_orders = st.session_state.order_data["Order ID"].unique().tolist()
       selected_order = st.selectbox(
-          "Select Order ID to Convert:", unique_orders
+          "Select Order ID to Convert:", unique_orders, key="convert_select"
       )
 
     with col_conv2:
@@ -196,7 +273,6 @@ with tab_orders:
 
         new_shipments = []
         for _, row in matching_items.iterrows():
-          # Check if this exact order line is already shipped
           exists = (
               (
                   st.session_state.container_data["Linked Order ID"]
@@ -281,7 +357,7 @@ with tab_containers:
     ]
 
   if df_containers.empty:
-    st.info("No container shipments found.")
+    st.info("No container shipments found matching your filters.")
   else:
     st.dataframe(df_containers, use_container_width=True)
 
