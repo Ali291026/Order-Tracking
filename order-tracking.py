@@ -80,9 +80,9 @@ tab_orders, tab_containers = st.tabs(
 # TAB 1: ORDER MANAGEMENT (MULTI-ITEM)
 # ==========================================
 with tab_orders:
-  st.subheader("🛒 Add Multi-Item Purchase Order")
+  st.subheader("🛒 Add Line Items to Purchase Order")
   st.caption(
-      "You can add multiple product line items under the same Order ID."
+      "Type the same Order ID to add multiple product lines under that order."
   )
 
   with st.form("add_order_form", clear_on_submit=True):
@@ -96,7 +96,7 @@ with tab_orders:
     with col3:
       order_date = st.date_input("Order Date")
 
-    st.markdown("##### Add Line Items for this Order")
+    st.markdown("##### Product Line Item Details")
     col_p1, col_p2 = st.columns([3, 1])
     with col_p1:
       product = st.text_input(
@@ -119,16 +119,16 @@ with tab_orders:
         ],
     )
 
-    submitted_order = st.form_submit_button("Add Line Item / Order")
+    submitted_order = st.form_submit_button("Add Line Item")
 
     if submitted_order:
       if order_id.strip() == "" or product.strip() == "":
         st.error("Please enter a valid Order ID and Product Description.")
       else:
         new_order = pd.DataFrame([{
-            "Order ID": order_id,
-            "Supplier": supplier,
-            "Product Description": product,
+            "Order ID": order_id.strip(),
+            "Supplier": supplier.strip(),
+            "Product Description": product.strip(),
             "Quantity": quantity,
             "Order Date": str(order_date),
             "Order Status": order_status,
@@ -136,7 +136,9 @@ with tab_orders:
         st.session_state.order_data = pd.concat(
             [st.session_state.order_data, new_order], ignore_index=True
         )
-        st.success(f"Added item '{product}' to Order {order_id}!")
+        st.success(
+            f"Successfully added line item '{product}' to Order {order_id}!"
+        )
         st.rerun()
 
   st.markdown("---")
@@ -168,6 +170,7 @@ with tab_orders:
       ]
 
       if not matching_items.empty:
+        # Mark all lines of this order as converted
         st.session_state.order_data.loc[
             st.session_state.order_data["Order ID"] == selected_order,
             "Order Status",
@@ -177,6 +180,7 @@ with tab_orders:
 
         new_shipments = []
         for _, row in matching_items.iterrows():
+          # Check if this exact order + product combination is already shipped
           exists = (
               (
                   st.session_state.container_data["Linked Order ID"]
@@ -265,7 +269,8 @@ with tab_containers:
       def format_container_dropdown(idx):
         row = st.session_state.container_data.loc[idx]
         return (
-            f"Row {idx}: {row['Container Number']} ({row['Product Description']})"
+            f"Row {idx}: {row['Container Number']} - {row['Product Description']}"
+            f" (Qty: {row['Quantity']})"
         )
 
       selected_idx = st.selectbox(
@@ -277,6 +282,9 @@ with tab_containers:
       current_row = st.session_state.container_data.loc[selected_idx]
 
       with st.form("update_container_form"):
+        up_container = st.text_input(
+            "Container Number", value=str(current_row["Container Number"])
+        )
         up_vessel = st.text_input(
             "Vessel Name", value=str(current_row["Vessel Name"])
         )
@@ -319,6 +327,9 @@ with tab_containers:
         save_update = st.form_submit_button("Save Shipment Updates")
 
         if save_update:
+          st.session_state.container_data.loc[selected_idx, "Container Number"] = (
+              up_container
+          )
           st.session_state.container_data.loc[selected_idx, "Vessel Name"] = (
               up_vessel
           )
@@ -347,19 +358,26 @@ with tab_containers:
   with col_delete:
     st.subheader("🗑️ Delete Shipment")
     if not st.session_state.container_data.empty:
-      cont_list = st.session_state.container_data["Container Number"].tolist()
-      selected_cont_to_delete = st.selectbox(
-          "Select Container Number to Remove:",
-          cont_list,
-          key="delete_cont_select",
+      # Let user delete by row index or container number
+      shipment_indices = st.session_state.container_data.index.tolist()
+
+      def format_shipment_delete(idx):
+        row = st.session_state.container_data.loc[idx]
+        return f"Row {idx}: {row['Container Number']} ({row['Product Description']})"
+
+      selected_del_idx = st.selectbox(
+          "Select Shipment Line Item to Remove:",
+          shipment_indices,
+          format_func=format_shipment_delete,
+          key="delete_ship_select",
       )
 
-      if st.button("Delete Selected Shipment"):
-        st.session_state.container_data = st.session_state.container_data[
-            st.session_state.container_data["Container Number"]
-            != selected_cont_to_delete
-        ].reset_index(drop=True)
-        st.success(f"Removed container: {selected_cont_to_delete}")
+      if st.button("Delete Selected Shipment Row"):
+        st.session_state.container_data = (
+            st.session_state.container_data.drop(selected_del_idx)
+            .reset_index(drop=True)
+        )
+        st.success(f"Removed shipment row {selected_del_idx} successfully!")
         st.rerun()
     else:
       st.caption("No shipments available.")
