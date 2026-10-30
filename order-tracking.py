@@ -26,6 +26,7 @@ if "container_data" not in st.session_state:
       columns=[
           "Container Number",
           "Vessel Name",
+          "Agent",
           "Product Description",
           "Quantity",
           "Bill of Lading (B/L)",
@@ -56,6 +57,7 @@ if st.sidebar.button("⚠️ Clear All Data (Orders & Shipments)", type="primary
       columns=[
           "Container Number",
           "Vessel Name",
+          "Agent",
           "Product Description",
           "Quantity",
           "Bill of Lading (B/L)",
@@ -77,15 +79,16 @@ tab_orders, tab_containers = st.tabs(
 )
 
 # ==========================================
-# TAB 1: ORDER MANAGEMENT (MULTI-ITEM)
+# TAB 1: ORDER MANAGEMENT (TRUE MULTI-ITEM)
 # ==========================================
 with tab_orders:
-  st.subheader("🛒 Add Line Items to Purchase Order")
+  st.subheader("🛒 Add Multiple Line Items to an Order")
   st.caption(
-      "Type the same Order ID to add multiple product lines under that order."
+      "Create a new Order ID or add extra product lines to an existing Order"
+      " ID."
   )
 
-  with st.form("add_order_form", clear_on_submit=True):
+  with st.form("add_order_form", clear_on_submit=False):
     col1, col2, col3 = st.columns(3)
     with col1:
       order_id = st.text_input(
@@ -96,7 +99,7 @@ with tab_orders:
     with col3:
       order_date = st.date_input("Order Date")
 
-    st.markdown("##### Product Line Item Details")
+    st.markdown("##### Product Line Item")
     col_p1, col_p2 = st.columns([3, 1])
     with col_p1:
       product = st.text_input(
@@ -119,52 +122,65 @@ with tab_orders:
         ],
     )
 
-    submitted_order = st.form_submit_button("Add Line Item")
+    submitted_order = st.form_submit_button("Add Line Item to Order")
 
     if submitted_order:
       if order_id.strip() == "" or product.strip() == "":
         st.error("Please enter a valid Order ID and Product Description.")
       else:
-        new_order = pd.DataFrame([{
+        new_row = pd.DataFrame([{
             "Order ID": order_id.strip(),
-            "Supplier": supplier.strip(),
+            "Supplier": supplier.strip() if supplier else "Unspecified",
             "Product Description": product.strip(),
             "Quantity": quantity,
             "Order Date": str(order_date),
             "Order Status": order_status,
         }])
         st.session_state.order_data = pd.concat(
-            [st.session_state.order_data, new_order], ignore_index=True
+            [st.session_state.order_data, new_row], ignore_index=True
         )
-        st.success(
-            f"Successfully added line item '{product}' to Order {order_id}!"
-        )
+        st.success(f"Added '{product}' (Qty: {quantity}) to Order {order_id}!")
         st.rerun()
 
   st.markdown("---")
-  st.subheader("📋 All Active Orders & Line Items")
+  st.subheader("📋 Active Orders & Line Items")
 
-  if st.session_state.order_data.empty:
-    st.info("No active orders found.")
+  # Filter Button for Pending Orders
+  col_f1, col_f2 = st.columns([1, 3])
+  with col_f1:
+    show_only_pending = st.checkbox("Show Only Pending Orders")
+
+  df_orders = st.session_state.order_data
+  if show_only_pending and not df_orders.empty:
+    df_orders = df_orders[df_orders["Order Status"] != "Converted to Shipment"]
+
+  if df_orders.empty:
+    st.info("No orders found matching your filter.")
   else:
-    st.dataframe(st.session_state.order_data, use_container_width=True)
+    st.dataframe(df_orders, use_container_width=True)
 
-    # Conversion & Management Section
-    st.markdown("#### 🔄 Convert Entire Order to Shipping Details")
+    # Conversion Section
+    st.markdown("#### 🔄 Convert Entire Order (All Line Items) to Shipment")
     col_conv1, col_conv2 = st.columns(2)
 
     with col_conv1:
-      unique_orders = st.session_state.order_data["Order ID"].unique().tolist()
+      unique_orders = (
+          st.session_state.order_data["Order ID"]
+          .unique()
+          .tolist()
+          if not st.session_state.order_data.empty
+          else []
+      )
       selected_order = st.selectbox(
-          "Select Order ID to Convert into Container Shipment:", unique_orders
+          "Select Order ID to Convert:", unique_orders
       )
 
     with col_conv2:
       st.write("")
       st.write("")
-      convert_button = st.button("Convert Order to Container Shipment ➡️")
+      convert_button = st.button("Convert Order to Shipment ➡️")
 
-    if convert_button:
+    if convert_button and selected_order:
       matching_items = st.session_state.order_data[
           st.session_state.order_data["Order ID"] == selected_order
       ]
@@ -180,7 +196,7 @@ with tab_orders:
 
         new_shipments = []
         for _, row in matching_items.iterrows():
-          # Check if this exact order + product combination is already shipped
+          # Check if this exact order line is already shipped
           exists = (
               (
                   st.session_state.container_data["Linked Order ID"]
@@ -196,6 +212,7 @@ with tab_orders:
             new_shipments.append({
                 "Container Number": dummy_container_no,
                 "Vessel Name": "TBD",
+                "Agent": "TBD Agent",
                 "Product Description": row["Product Description"],
                 "Quantity": row["Quantity"],
                 "Bill of Lading (B/L)": "Pending",
@@ -215,13 +232,11 @@ with tab_orders:
           )
           st.success(
               f"Successfully converted Order {selected_order} ({len(new_shipments)}"
-              f" line items) into Container Shipment {dummy_container_no}!"
+              f" items) into Container {dummy_container_no}!"
           )
           st.rerun()
         else:
-          st.warning(
-              "These line items have already been converted to shipments."
-          )
+          st.warning("These items have already been converted.")
 
 # ==========================================
 # TAB 2: CONTAINER SHIPPING & COMPLIANCE
@@ -229,17 +244,33 @@ with tab_orders:
 with tab_containers:
   st.subheader("🚢 Container Shipping & Compliance Tracker")
 
-  # Search Filter
-  search_query = st.text_input(
-      "🔍 Search by Container, Vessel, Product, B/L, or Order ID:", value=""
-  )
+  # Filtering Controls
+  col_filt1, col_filt2 = st.columns(2)
+  with col_filt1:
+    search_query = st.text_input(
+        "🔍 Search Container, Vessel, Agent, Product, B/L, or Order ID:",
+        value="",
+    )
+  with col_filt2:
+    status_filter = st.selectbox(
+        "Filter by Shipment Status:",
+        ["All Statuses", "In Transit", "Customs Hold", "Cleared", "Delivered"],
+    )
+
   df_containers = st.session_state.container_data
 
+  # Apply Status Filter
+  if status_filter != "All Statuses":
+    df_containers = df_containers[df_containers["Status"] == status_filter]
+
+  # Apply Search Filter
   if search_query:
-    df_containers_filtered = df_containers[
+    df_containers = df_containers[
         df_containers["Container Number"]
         .str.contains(search_query, case=False, na=False)
         | df_containers["Vessel Name"]
+        .str.contains(search_query, case=False, na=False)
+        | df_containers["Agent"]
         .str.contains(search_query, case=False, na=False)
         | df_containers["Product Description"]
         .str.contains(search_query, case=False, na=False)
@@ -248,13 +279,11 @@ with tab_containers:
         | df_containers["Linked Order ID"]
         .str.contains(search_query, case=False, na=False)
     ]
-  else:
-    df_containers_filtered = df_containers
 
-  if df_containers_filtered.empty:
+  if df_containers.empty:
     st.info("No container shipments found.")
   else:
-    st.dataframe(df_containers_filtered, use_container_width=True)
+    st.dataframe(df_containers, use_container_width=True)
 
   st.markdown("---")
 
@@ -270,7 +299,7 @@ with tab_containers:
         row = st.session_state.container_data.loc[idx]
         return (
             f"Row {idx}: {row['Container Number']} - {row['Product Description']}"
-            f" (Qty: {row['Quantity']})"
+            f" ({row['Status']})"
         )
 
       selected_idx = st.selectbox(
@@ -287,6 +316,9 @@ with tab_containers:
         )
         up_vessel = st.text_input(
             "Vessel Name", value=str(current_row["Vessel Name"])
+        )
+        up_agent = st.text_input(
+            "Agent Name", value=str(current_row["Agent"])
         )
         up_bl = st.text_input(
             "Bill of Lading (B/L)",
@@ -333,6 +365,7 @@ with tab_containers:
           st.session_state.container_data.loc[selected_idx, "Vessel Name"] = (
               up_vessel
           )
+          st.session_state.container_data.loc[selected_idx, "Agent"] = up_agent
           st.session_state.container_data.loc[
               selected_idx, "Bill of Lading (B/L)"
           ] = up_bl
@@ -358,7 +391,6 @@ with tab_containers:
   with col_delete:
     st.subheader("🗑️ Delete Shipment")
     if not st.session_state.container_data.empty:
-      # Let user delete by row index or container number
       shipment_indices = st.session_state.container_data.index.tolist()
 
       def format_shipment_delete(idx):
